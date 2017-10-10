@@ -112,3 +112,5 @@ qplot(merged$Fare,bins=150)
 ## There are a lot of Fares around 10 so these should have 
 
 Faretable <- count(merged,"Fare")
+
+## new update
