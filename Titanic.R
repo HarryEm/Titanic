@@ -1,3 +1,8 @@
+# This is my first attempt at Kaggle and writing a full data project from start to 
+# finish, hopefully this will be a clear demonstration of my thought process, any 
+# feedback is more than welcome, especially if pointers for improvement in whichever
+# aspect needs some work.
+
 # Loading libraries
 library(ggplot2) #charting
 library(plyr) #data wrangling
@@ -112,5 +117,58 @@ qplot(merged$Fare,bins=150)
 ## There are a lot of Fares around 10 so these should have 
 
 Faretable <- count(merged,"Fare")
+########
 
-## new update
+head(order(merged$Fare,decreasing = TRUE))
+merged[259]
+subset(merged,Fare==merged$Fare[259])
+
+##One group paid over $500!
+
+#is ticket overall cost or each ticket?
+
+## Can we extract any information from the name?
+
+## Just for fun: from https://en.wikipedia.org/wiki/Titanic_(1997_film) 
+## Jack Dawson is actually Joseph Dawson, who is not in our sample,
+## and neither is Rose. I didn't need a model to classify them anyway.
+
+grep("Dawson",merged$Name)
+grep("Rose",merged$Name)
+
+merged$Title <- as.factor(gsub('(.*, )|(\\..*)', '', merged$Name))
+count(merged$Title)
+
+VIP <- c("Capt","Col","Don","Dona","Dr","Jonkheer","Lady","Major",
+         "Mlle", "Mme","Rev","Sir","the Countess")
+
+merged$Title[merged$Title %in% VIP] <- "VIP"
+
+count(merged$Title)
+
+## I'm not that keen on only having 2 in the "Ms" camp but we can come back to that
+
+g <- ggplot(merged[1:891,], aes(x=Title,fill=factor(Survived))) + geom_bar()
+g <- g +facet_wrap(~Pclass) + labs(title="Survivor split by class and Title")
+g
+
+## I'm not sure how useful this is going to be based on the charts.
+## Onto surname, I'm interested to see if there was some racial bias
+## towards American / English
+
+#library(phonics)
+#library(wru)
+
+
+merged$surname<- gsub("([A-Za-z]+).*", "\\1", merged$Name)
+
+predict_race(merged,surname.only = TRUE)
+raceprobs <- predict_race(merged,surname.only = TRUE)[18:22]
+racepreds <- colnames(raceprobs)[apply(raceprobs,1,which.max)]
+merged$Race <- sub('.*\\.', '',racepreds)
+
+g <- ggplot(merged[1:891,], aes(x=Race,fill=factor(Survived))) + geom_bar()
+g <- g +facet_wrap(~Pclass) + labs(title="Survivor split by class and Race")
+g
+
+
