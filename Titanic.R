@@ -6,6 +6,8 @@
 # Loading libraries
 library(ggplot2) #charting
 library(plyr) #data wrangling
+library(dplyr) #data wrangling
+library(Hmisc) #data wrangling
 
 # Obtaining and reading in the data
 
@@ -114,13 +116,31 @@ g
 
 qplot(merged$Fare,bins=150)
 
-## There are a lot of Fares around 10 so these should have 
+## There doesn't seem to be natural brackets here unlike age, so I will just
+## split in equal groups. There is one missing entry for Fare, I will impute
+## the average Fare for his Pclass
 
-Faretable <- count(merged,"Fare")
-########
+subset(merged,is.na(merged$Fare))
+merged[1044,]$Fare <- mean(subset(merged,Pclass==3)$Fare,na.rm=TRUE)
+
+#Faretable <- count(merged,"Fare")
+#
+merged$Farebracket <- as.factor(cut2(merged$Fare,g=5))
+
+g <- ggplot(merged[1:891,], aes(x=Farebracket,fill=factor(Survived))) + geom_bar()
+g <- g +facet_wrap(~Pclass) + labs(title="Survivor split by class and Fare Bracket")
+g <- g + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+g 
+
+head(merged[order(merged$Fare,decreasing = FALSE),]$Fare)
+subset(merged,Fare==0)
+
+## This is more useful than expected, it does seem to split out the survivors within
+## a class quite nicely
 
 head(order(merged$Fare,decreasing = TRUE))
 merged[259]
+
 subset(merged,Fare==merged$Fare[259])
 
 ##One group paid over $500!
@@ -156,19 +176,26 @@ g
 ## Onto surname, I'm interested to see if there was some racial bias
 ## towards American / English
 
-#library(phonics)
-#library(wru)
-
+library(wru) # who r u - library to guess race from surname
 
 merged$surname<- gsub("([A-Za-z]+).*", "\\1", merged$Name)
 
 predict_race(merged,surname.only = TRUE)
 raceprobs <- predict_race(merged,surname.only = TRUE)[18:22]
 racepreds <- colnames(raceprobs)[apply(raceprobs,1,which.max)]
-merged$Race <- sub('.*\\.', '',racepreds)
+merged$Race <- as.factor(sub('.*\\.', '',racepreds))
 
 g <- ggplot(merged[1:891,], aes(x=Race,fill=factor(Survived))) + geom_bar()
 g <- g +facet_wrap(~Pclass) + labs(title="Survivor split by class and Race")
 g
 
 
+
+merged[order(merged$Fare,decreasing = TRUE),]
+
+
+
+train <- merged[1:600,]
+test <- merged[600:891,]
+
+model <- glm(Survived ~.,family=binomial(link='logit'),data=train)
