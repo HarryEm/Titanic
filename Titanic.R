@@ -8,6 +8,7 @@ library(ggplot2) #charting
 library(plyr) #data wrangling
 library(dplyr) #data wrangling
 library(Hmisc) #data wrangling
+library(mice) #imputing variables
 
 # Obtaining and reading in the data
 
@@ -156,15 +157,16 @@ subset(merged,Fare==merged$Fare[259])
 grep("Dawson",merged$Name)
 grep("Rose",merged$Name)
 
-merged$Title <- as.factor(gsub('(.*, )|(\\..*)', '', merged$Name))
-count(merged$Title)
+merged$Title <- gsub('(.*, )|(\\..*)', '', merged$Name)
+
+count(merged,Title)
 
 VIP <- c("Capt","Col","Don","Dona","Dr","Jonkheer","Lady","Major",
          "Mlle", "Mme","Rev","Sir","the Countess")
 
 merged$Title[merged$Title %in% VIP] <- "VIP"
 
-count(merged$Title)
+count(merged,Title)
 
 ## I'm not that keen on only having 2 in the "Ms" camp but we can come back to that
 
@@ -189,10 +191,29 @@ g <- ggplot(merged[1:891,], aes(x=Race,fill=factor(Survived))) + geom_bar()
 g <- g +facet_wrap(~Pclass) + labs(title="Survivor split by class and Race")
 g
 
-
-
 merged[order(merged$Fare,decreasing = TRUE),]
 
+## Ticketsize variable
+merged <- ddply(merged,.(Ticket),transform,Ticketsize=length(Ticket))
+merged$Ticketsize <- as.factor(merged$Ticketsize)
+
+## Embarked
+count(merged,Embarked) #I'm just going to use the most frequent here ie S
+subset(merged,Embarked == "")
+merged[c(62,830),"Embarked"] <- "S"
+
+## To begin with, I want to use the mice library to impute the missing ages.
+## Then I want to check if we get improvement by splitting data as explained
+## above; this seems pivtotal to the analysis.
+
+factors <- c("Pclass","Sex","Agebracket","Title")
+set.seed(1234)
+mice_ages <- mice(merged[, !names(merged) %in% factors], method='rf')
+mice_out <- complete(mice_ages)
+
+
+colSums(is.na(mice_out))
+colSums(mice_out=="")
 
 
 train <- merged[1:600,]
