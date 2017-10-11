@@ -208,13 +208,25 @@ merged[c(62,830),"Embarked"] <- "S"
 
 factors <- c("Pclass","Sex","Agebracket","Title")
 set.seed(1234)
-mice_ages <- mice(merged[, !names(merged) %in% factors], method='rf')
+m1 <- merged[, !names(merged) %in% c("Agebracket","Age_range")]
+mice_ages <- mice(m1[, !names(m1) %in% factors], method='rf')
 mice_out <- complete(mice_ages)
 
+mice_out$Agebracket <- findInterval(mice_out$Age,agebrackets)
+mice_out <- join(mice_out,agetable,by="Agebracket")
 
 colSums(is.na(mice_out))
 colSums(mice_out=="")
 
+
+# Initial model fit
+
+set.seed(1966)
+
+rf_model <- randomForest(factor(Survived) ~ Pclass + Sex + Agebracket +
+                                 Farebracket + Race + HasCabin + Ticketsize +
+                                 Embarked,
+                         data = mice_out)
 
 train <- merged[1:600,]
 test <- merged[600:891,]
