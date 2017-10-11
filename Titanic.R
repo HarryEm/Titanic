@@ -10,6 +10,7 @@ library(dplyr) #data wrangling
 library(Hmisc) #data wrangling
 library(mice) #imputing variables
 library(randomForest) #modelling
+library(caret) #modelling
 
 # Obtaining and reading in the data
 
@@ -239,6 +240,11 @@ mergedagestrain <- mergedages[1:891,]
 mergedagestest <- mergedages[892:1309,]
 mergedagestrain$Survived <- as.factor(traindata$Survived)
 
+set.seed(414)
+inTrain<- createDataPartition(y=mergedagestrain$Survived,p=0.75, list=FALSE)
+train <- mergedagestrain[inTrain,]
+test <- mergedagestrain[-inTrain,]
+
 rf_model <- randomForest(factor(Survived) ~ Pclass + Sex + Agebracket +
                                  Farebracket + Race + HasCabin + Ticketsize +
                                  Embarked,
@@ -262,16 +268,77 @@ rf_model3 <- randomForest(factor(Survived) ~ Pclass + Sex + Agebracket +
 rf_model3
 varImpPlot(rf_model3)
 
-logreg <- glm(Survived ~ Pclass + Sex + Agebracket +
+logreg <- glm(Survived ~ Pclass + Sex + Age_range +
                       Farebracket + HasCabin + Ticketsize, family = binomial(link=logit), 
-              data = mergedagestrain)
+              data = train)
 
 summary(logreg)
 
-prediction <- predict(rf_model, mergedagestest)
-submission <- data.frame(prediction)
-names(submission) <- c("PassengerID","Survived")
 
+
+prediction <- predict(logreg,newdata=test,type="response")
+prediction <- ifelse(prediction > 0.5,1,0)
+misClasificError <- mean(prediction != test$Survived)
+print(paste('Accuracy',1-misClasificError)) ## Accuracy 79%
+
+## Lasso regularised logistic regression
+library(glmnet)
+x <- model.matrix(Survived ~ Pclass + Sex + Age_range +
+                                 Farebracket + HasCabin + Ticketsize,train)
+cv.out <- cv.glmnet(x,y=train$Survived,alpha=1,family="binomial",type.measure = "mse") #select lambda -4
+
+#best value of lambda
+lambda_1se <- cv.out$lambda.1se
+
+xtest <- x <- model.matrix(Survived ~ Pclass + Sex + Age_range +
+                                   Farebracket + HasCabin + Ticketsize,test)
+lasso_prob <- predict(cv.out,newx = xtest,s=lambda_1se,type="response")
+#translate probabilities to predictions
+
+lasso_predict <- rep("0",nrow(test))
+lasso_predict[lasso_prob>.5] <-"1"
+#confusion matrix
+table(pred=lasso_predict,true=test$Survived)
+
+mean(lasso_predict==test$Survived) #78% accuracy
+
+
+## GBM
+
+features <- c("Survived","Pclass","Sex","SibSp","Parch","HasCabin","Farebracket","Title","Ticketsize","Age_range")
+fitControl <- trainControl(method = "repeatedcv", number = 4, repeats = 4)
+
+
+test[test$Title=="Ms",]$Title <- "Mrs"
+
+gbm1 <- train(as.factor(Survived) ~ ., data = train[features], 
+              method = "gbm", trControl = fitControl,verbose = FALSE)
+prediction <- predict(gbm1, test[features],type= "prob")
+prediction <- data.frame(ifelse(prediction[,2] > 0.5,1,0))
+mean(prediction[,1] == test$Survived) #82% accuracy
+
+fitControl2 <- trainControl(method = "repeatedcv", number = 6, repeats = 4)
+gbm2 <- train(as.factor(Survived) ~ ., data = train[features], 
+              method = "gbm", trControl = fitControl,verbose = FALSE)
+prediction <- predict(gbm2, test[features],type= "prob")
+prediction <- data.frame(ifelse(prediction[,2] > 0.5,1,0))
+mean(prediction[,1] == test$Survived)
+
+prediction <- predict(rf_model, mergedagestest)
+
+prediction <- predict(logreg,newdata=mergedagestest,type="response")
+prediction <- ifelse(prediction > 0.5,1,0)
+
+mergedagestest[mergedagestest$Title=="Ms",]$Title <- "Mrs"
+prediction <- predict(gbm1, mergedagestest[features],type= "prob")
+prediction <- data.frame("PassengerID" = mergedagestest$PassengerId,"Survived"=ifelse(prediction[,2] > 0.5,1,0))
+
+prediction <- predict(gbm2, mergedagestest[features],type= "prob")
+prediction <- data.frame("PassengerID" = mergedagestest$PassengerId,"Survived"=ifelse(prediction[,2] > 0.5,1,0))
+
+
+submission <- data.frame(PassengerID=names(prediction),Survived=prediction)
+write.csv(submission, file = "./Kaggle/Titanic/predictions.csv")
 
 if(!file.exists("./Kaggle/Titanic/predictions.csv")) {
         write.csv(submission, file = "./Kaggle/Titanic/predictions.csv")}
