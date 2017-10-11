@@ -9,6 +9,7 @@ library(plyr) #data wrangling
 library(dplyr) #data wrangling
 library(Hmisc) #data wrangling
 library(mice) #imputing variables
+library(randomForest) #modelling
 
 # Obtaining and reading in the data
 
@@ -54,7 +55,7 @@ colSums(merged=="")
 
 ## Let's look at charts of survivor trends by age, class, gender
 
-merged$Survived <- as.factor(merged$Survived)
+#merged$Survived <- as.factor(merged$Survived)
 merged$Pclass <- as.factor(merged$Pclass)
 merged$Sex <- as.factor(merged$Sex)
 
@@ -196,6 +197,7 @@ merged[order(merged$Fare,decreasing = TRUE),]
 ## Ticketsize variable
 merged <- ddply(merged,.(Ticket),transform,Ticketsize=length(Ticket))
 merged$Ticketsize <- as.factor(merged$Ticketsize)
+merged <- merged[order(merged$PassengerId),] # ddply mixes up order
 
 ## Embarked
 count(merged,Embarked) #I'm just going to use the most frequent here ie S
@@ -208,27 +210,68 @@ merged[c(62,830),"Embarked"] <- "S"
 
 factors <- c("Pclass","Sex","Agebracket","Title")
 set.seed(1234)
-m1 <- merged[, !names(merged) %in% c("Agebracket","Age_range")]
+#m1 <- merged[, !names(merged) %in% c("Agebracket","Age_range")]
 mice_ages <- mice(m1[, !names(m1) %in% factors], method='rf')
 mice_out <- complete(mice_ages)
 
-mice_out$Agebracket <- findInterval(mice_out$Age,agebrackets)
-mice_out <- join(mice_out,agetable,by="Agebracket")
+#mice_out$Agebracket <- findInterval(mice_out$Age,agebrackets)
+#mice_out <- join(mice_out,agetable,by="Agebracket")
 
-colSums(is.na(mice_out))
-colSums(mice_out=="")
+merged$Agebracket <- as.factor(merged$Agebracket)
+merged$Embarked <- as.factor(merged$Embarked)
+
+
+mergedages <- merged[,!names(merged) == "Age_range"]
+mergedages$Age <- mice_out$Age
+
+mergedages$Agebracket <- findInterval(mergedages$Age,agebrackets)
+mergedages <- join(mergedages,agetable,by="Agebracket")
+
+colSums(is.na(mergedages))
+colSums(mergedages=="")
 
 
 # Initial model fit
 
 set.seed(1966)
 
+mergedagestrain <- mergedages[1:891,]
+mergedagestest <- mergedages[892:1309,]
+mergedagestrain$Survived <- as.factor(traindata$Survived)
+
 rf_model <- randomForest(factor(Survived) ~ Pclass + Sex + Agebracket +
                                  Farebracket + Race + HasCabin + Ticketsize +
                                  Embarked,
-                         data = mice_out)
+                         data = mergedagestrain,na.action = na.pass)
 
-train <- merged[1:600,]
-test <- merged[600:891,]
+rf_model
+varImpPlot(rf_model)
 
-model <- glm(Survived ~.,family=binomial(link='logit'),data=train)
+rf_model2 <- randomForest(factor(Survived) ~ Pclass + Sex + Agebracket +
+                                 Farebracket + HasCabin + Ticketsize,
+                         data = mergedagestrain,na.action = na.pass,ntree=2000)
+
+rf_model2
+varImpPlot(rf_model2)
+
+rf_model3 <- randomForest(factor(Survived) ~ Pclass + Sex + Agebracket +
+                                 Farebracket + Race + HasCabin + Ticketsize +
+                                 Embarked,
+                         data = mergedagestrain,na.action = na.pass,ntree=5000)
+
+rf_model3
+varImpPlot(rf_model3)
+
+logreg <- glm(Survived ~ Pclass + Sex + Agebracket +
+                      Farebracket + HasCabin + Ticketsize, family = binomial(link=logit), 
+              data = mergedagestrain)
+
+summary(logreg)
+
+prediction <- predict(rf_model, mergedagestest)
+submission <- data.frame(prediction)
+names(submission) <- c("PassengerID","Survived")
+
+
+if(!file.exists("./Kaggle/Titanic/predictions.csv")) {
+        write.csv(submission, file = "./Kaggle/Titanic/predictions.csv")}
