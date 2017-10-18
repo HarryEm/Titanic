@@ -167,10 +167,14 @@ VIP <- c("Capt","Col","Don","Dona","Dr","Jonkheer","Lady","Major",
          "Mlle", "Mme","Rev","Sir","the Countess")
 
 merged$Title[merged$Title %in% VIP] <- "VIP"
+merged[merged$Title=="Ms",]$Title <- "Mrs"
+
+merged$Title <- as.factor(merged$Title)
 
 count(merged,Title)
 
-## I'm not that keen on only having 2 in the "Ms" camp but we can come back to that
+## I'm not that keen on only having 2 in the "Ms" camp
+merged[merged$Title=="Ms",]$Title <- "Mrs"
 
 g <- ggplot(merged[1:891,], aes(x=Title,fill=factor(Survived))) + geom_bar()
 g <- g +facet_wrap(~Pclass) + labs(title="Survivor split by class and Title")
@@ -247,11 +251,13 @@ test <- mergedagestrain[-inTrain,]
 
 rf_model <- randomForest(factor(Survived) ~ Pclass + Sex + Agebracket +
                                  Farebracket + Race + HasCabin + Ticketsize +
-                                 Embarked,
+                                 Embarked + Title,
                          data = mergedagestrain,na.action = na.pass)
 
 rf_model
+rf_model$confusion
 varImpPlot(rf_model)
+importance(rf_model)
 
 rf_model2 <- randomForest(factor(Survived) ~ Pclass + Sex + Agebracket +
                                  Farebracket + HasCabin + Ticketsize,
@@ -268,30 +274,52 @@ rf_model3 <- randomForest(factor(Survived) ~ Pclass + Sex + Agebracket +
 rf_model3
 varImpPlot(rf_model3)
 
-logreg <- glm(Survived ~ Pclass + Sex + Age_range +
-                      Farebracket + HasCabin + Ticketsize, family = binomial(link=logit), 
+rf_model4 <- randomForest(factor(Survived) ~ Pclass + Sex +
+                                 Farebracket + Ticketsize,
+                         data = mergedagestrain,na.action = na.pass)
+
+rf_model4
+rf_model4$confusion
+
+rf_model5 <- randomForest(factor(Survived) ~ Pclass + Sex +
+                                Farebracket + Race + HasCabin + Ticketsize
+                                  + Embarked,
+                         data = mergedagestrain,na.action = na.pass)
+
+rf_model5
+rf_model5$confusion
+plot(rf_model5)
+
+rf_model6 <- randomForest(factor(Survived) ~ Pclass + Sex + Farebracket + HasCabin + Ticketsize + Embarked + Title,
+                         data = mergedagestrain,na.action = na.pass,nodesize=20)
+
+rf_model6 #looks the best
+plot(rf_model6)
+varImpPlot(rf_model6)
+importance(rf_model6)
+
+logreg <- glm(Survived ~ Pclass + Sex + Agebracket +
+                      Farebracket + HasCabin + Ticketsize
+               + Title + Embarked, family = binomial(link=logit), 
               data = train)
 
 summary(logreg)
-
-
+plot(logreg)
 
 prediction <- predict(logreg,newdata=test,type="response")
 prediction <- ifelse(prediction > 0.5,1,0)
 misClasificError <- mean(prediction != test$Survived)
-print(paste('Accuracy',1-misClasificError)) ## Accuracy 79%
+print(paste('Accuracy',1-misClasificError)) ## Accuracy 81%
 
 ## Lasso regularised logistic regression
 library(glmnet)
-x <- model.matrix(Survived ~ Pclass + Sex + Age_range +
-                                 Farebracket + HasCabin + Ticketsize,train)
+x <- model.matrix(Survived ~ Pclass + Sex + Farebracket + HasCabin + Ticketsize + Embarked + Title,train)
 cv.out <- cv.glmnet(x,y=train$Survived,alpha=1,family="binomial",type.measure = "mse") #select lambda -4
 
 #best value of lambda
 lambda_1se <- cv.out$lambda.1se
 
-xtest <- x <- model.matrix(Survived ~ Pclass + Sex + Age_range +
-                                   Farebracket + HasCabin + Ticketsize,test)
+xtest <- model.matrix(Survived ~ Pclass + Sex + Farebracket + HasCabin + Ticketsize + Embarked + Title,test)
 lasso_prob <- predict(cv.out,newx = xtest,s=lambda_1se,type="response")
 #translate probabilities to predictions
 
@@ -300,7 +328,7 @@ lasso_predict[lasso_prob>.5] <-"1"
 #confusion matrix
 table(pred=lasso_predict,true=test$Survived)
 
-mean(lasso_predict==test$Survived) #78% accuracy
+mean(lasso_predict==test$Survived) #82% accuracy
 
 
 ## GBM
@@ -308,8 +336,6 @@ mean(lasso_predict==test$Survived) #78% accuracy
 features <- c("Survived","Pclass","Sex","SibSp","Parch","HasCabin","Farebracket","Title","Ticketsize","Age_range")
 fitControl <- trainControl(method = "repeatedcv", number = 4, repeats = 4)
 
-
-test[test$Title=="Ms",]$Title <- "Mrs"
 
 gbm1 <- train(as.factor(Survived) ~ ., data = train[features], 
               method = "gbm", trControl = fitControl,verbose = FALSE)
@@ -322,7 +348,26 @@ gbm2 <- train(as.factor(Survived) ~ ., data = train[features],
               method = "gbm", trControl = fitControl,verbose = FALSE)
 prediction <- predict(gbm2, test[features],type= "prob")
 prediction <- data.frame(ifelse(prediction[,2] > 0.5,1,0))
+mean(prediction[,1] == test$Survived) #82.5% accuracy
+
+gbm3 <- train(as.factor(Survived) ~ ., data = rbind(train[features],test[features]), 
+              method = "gbm", trControl = fitControl,verbose = FALSE)
+#use test data as well to train the model - did not improve
+
+gbm4 <- gbm(as.factor(Survived)~.,data=train[features],distribution="bernoulli",n.trees=5000,interaction.depth=4)
+prediction <- predict(gbm4, newdata=test[features],n.trees=5000,type="response")
+prediction <- data.frame(ifelse(prediction[,2] > 0.5,1,0))
 mean(prediction[,1] == test$Survived)
+
+
+## Xgboost
+library(xgboost) #modelling
+
+params <- list(booster = "gbtree", objective = "binary:logistic", eta=0.3, gamma=0, max_depth=6, min_child_weight=1, subsample=1, colsample_bytree=1)
+
+xgbcv <- xgb.cv(params = params, data = train[features], nrounds = 100, nfold = 5, 
+                showsd = T, stratified = T, print.every.n = 10, early.stop.round = 20, maximize = F)
+
 
 prediction <- predict(rf_model, mergedagestest)
 
@@ -336,9 +381,12 @@ prediction <- data.frame("PassengerID" = mergedagestest$PassengerId,"Survived"=i
 prediction <- predict(gbm2, mergedagestest[features],type= "prob")
 prediction <- data.frame("PassengerID" = mergedagestest$PassengerId,"Survived"=ifelse(prediction[,2] > 0.5,1,0))
 
+prediction <- predict(gbm3, mergedagestest[features],type= "prob")
+prediction <- data.frame("PassengerID" = mergedagestest$PassengerId,"Survived"=ifelse(prediction[,2] > 0.5,1,0))
 
-submission <- data.frame(PassengerID=names(prediction),Survived=prediction)
-write.csv(submission, file = "./Kaggle/Titanic/predictions.csv")
+
+submission <- data.frame(PassengerId=names(prediction),Survived=prediction)
+write.csv(submission, file = "./Kaggle/Titanic/predictions.csv",row.names = F)
 
 if(!file.exists("./Kaggle/Titanic/predictions.csv")) {
-        write.csv(submission, file = "./Kaggle/Titanic/predictions.csv")}
+        write.csv(submission, file = "./Kaggle/Titanic/predictions.csv",row.names = F)}
