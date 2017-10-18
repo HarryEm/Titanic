@@ -368,6 +368,47 @@ params <- list(booster = "gbtree", objective = "binary:logistic", eta=0.3, gamma
 xgbcv <- xgb.cv(params = params, data = train[features], nrounds = 100, nfold = 5, 
                 showsd = T, stratified = T, print.every.n = 10, early.stop.round = 20, maximize = F)
 
+## Now onto training two models depending on whether Age is available, need to split up data
+
+row.names(merged) <- merged$PassengerId
+mergedtrain <- merged[1:891,]
+mergedtest <- merged[892:1309,]
+mergedtrain$Survived <- as.factor(mergedtrain$Survived)
+
+sum(is.na(mergedtrain$Age))
+sum(is.na(mergedtest$Age))
+
+
+
+mergedtrain[is.na(mergedtrain$Age),]
+mergedtrain[!is.na(mergedtrain$Age),]
+
+
+rf_model_ages <- randomForest(factor(Survived) ~ Pclass + Sex + Farebracket + HasCabin + Agebracket + Ticketsize + Embarked + Title,
+                              data = mergedtrain[!is.na(mergedtrain$Age),],nodesize=20)
+
+rf_model_ages
+rf_model_ages$confusion
+varImpPlot(rf_model_ages)
+importance(rf_model_ages)
+
+
+rf_model_noages <- randomForest(factor(Survived) ~ Pclass + Sex +
+                                      Farebracket + Race + HasCabin + Ticketsize +
+                                      Embarked + Title,
+                              data = mergedtrain[is.na(mergedtrain$Age),],nodesize=20)
+
+rf_model_noages
+rf_model_noages$confusion
+varImpPlot(rf_model_noages)
+importance(rf_model_noages)
+
+p1 <- predict(rf_model_ages, mergedtest[!is.na(mergedtest$Age),])
+p2 <- predict(rf_model_noages, mergedtest[is.na(mergedtest$Age),])
+prediction <- join(data.frame(PassengerId=names(p1),Survived=p1),data.frame(PassengerId=names(p2),Survived=p2))
+
+# This actually didn't help my position on the leaderboard, pretty surprised by this
+
 
 prediction <- predict(rf_model, mergedagestest)
 
