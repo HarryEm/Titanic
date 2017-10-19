@@ -23,7 +23,7 @@ questions or advice, I'm here to learn and build my network!
 
 ## Loading libraries and data
 
-```{r}
+```{r,message=FALSE}
 # Loading libraries
 library(ggplot2) #charting
 library(plyr) #data wrangling
@@ -78,7 +78,7 @@ Let's look at charts of survivor trends by age, class, gender
 
 ```{r}
 merged$Pclass <- as.factor(merged$Pclass)
-
+merged$Sex <- as.factor(merged$Sex)
 
 g <- ggplot(merged[1:891,], aes(x=Pclass,fill=factor(Survived))) + geom_bar() + labs(fill = "Survived")
 g <- g + labs(title="Survivor split by ticket class")
@@ -221,14 +221,14 @@ I'm not sure how useful this is going to be based on the charts.
 Onto surname, I'm interested to see if there was some racial bias here.
 
 
-```{r}
+```{r,message=FALSE}
 library(wru) # who r u - library to guess race from surname
 
 merged$surname<- gsub("([A-Za-z]+).*", "\\1", merged$Name)
 
 predict_race(merged,surname.only = TRUE)
 raceprobs <- predict_race(merged,surname.only = TRUE)[18:22]
-racepreds <- colnames(raceprobs)[apply(raceprobs,1,which.max)]
+racepreds <- suppressWarnings(colnames(raceprobs)[apply(raceprobs,1,which.max)])
 merged$Race <- as.factor(sub('.*\\.', '',racepreds))
 
 g <- ggplot(merged[1:891,], aes(x=Race,fill=factor(Survived))) + geom_bar()
@@ -276,6 +276,7 @@ mergedages$Age <- mice_out$Age
 
 mergedages$Agebracket <- findInterval(mergedages$Age,agebrackets)
 mergedages <- join(mergedages,agetable,by="Agebracket")
+mergedages$Agebracket <- as.factor(mergedages$Agebracket)
 
 colSums(is.na(mergedages))
 colSums(mergedages=="")
@@ -366,24 +367,24 @@ importance(rf_model2)
 
 ## GBM
 
-```{r}
+```{r,message=FALSE}
 features <- c("Survived","Pclass","Sex","SibSp","Parch","HasCabin","Farebracket","Title","Ticketsize","Age_range")
 fitControl <- trainControl(method = "repeatedcv", number = 4, repeats = 4)
 
 set.seed(414)
-gbm1 <- train(as.factor(Survived) ~ ., data = train[features], 
-              method = "gbm", trControl = fitControl,verbose = FALSE)
+gbm1 <- suppressWarnings(train(as.factor(Survived) ~ ., data = train[features], 
+              method = "gbm", trControl = fitControl,verbose = FALSE))
 prediction <- predict(gbm1, test[features],type= "prob")
 prediction <- data.frame(ifelse(prediction[,2] > 0.5,1,0))
-mean(prediction[,1] == test$Survived) #82% accuracy
+mean(prediction[,1] == test$Survived) #83% accuracy
 
 set.seed(414)
 fitControl2 <- trainControl(method = "repeatedcv", number = 6, repeats = 4)
-gbm2 <- train(as.factor(Survived) ~ ., data = train[features], 
-              method = "gbm", trControl = fitControl,verbose = FALSE)
+gbm2 <- suppressWarnings(train(as.factor(Survived) ~ ., data = train[features], 
+              method = "gbm", trControl = fitControl,verbose = FALSE))
 prediction <- predict(gbm2, test[features],type= "prob")
 prediction <- data.frame(ifelse(prediction[,2] > 0.5,1,0))
-mean(prediction[,1] == test$Survived) #82.5% accuracy
+mean(prediction[,1] == test$Survived) #83% accuracy
 ```
 
 ## Splitting models depending on whether age is available or not
