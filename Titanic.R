@@ -29,7 +29,7 @@ testdata <- read.csv("./Kaggle/Titanic/test.csv",stringsAsFactors = FALSE)
 c(object.size(traindata),object.size(testdata)) ## data is small so performance shouldn't be an issue
 #sum(traindata$PassengerId %in% testdata$PassengerId) == 0 ## check train and test set are disjoint
 
-## I want to combine training and test sets because this makes it easier to perform same 
+## I want to combine training and test sets because this makes it easier to perform the same 
 ## operations on both sets
 
 testdata$Survived <- "NA"
@@ -56,7 +56,6 @@ colSums(merged=="")
 
 ## Let's look at charts of survivor trends by age, class, gender
 
-#merged$Survived <- as.factor(merged$Survived)
 merged$Pclass <- as.factor(merged$Pclass)
 merged$Sex <- as.factor(merged$Sex)
 
@@ -237,8 +236,6 @@ colSums(mergedages=="")
 
 
 # Initial model fit
-
-set.seed(1966)
 
 mergedagestrain <- mergedages[1:891,]
 mergedagestest <- mergedages[892:1309,]

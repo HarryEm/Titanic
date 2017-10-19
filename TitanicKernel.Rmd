@@ -1,14 +1,27 @@
 ---
-title: "Titanic Kernel"
-output: html_notebook
+title: 'Titanic: an Introduction to Feature Engineering'
+author: "Harry Emeric"
+date: "19 October, 2017"
+output:
+  html_notebook: default
+  html_document: default
+theme: united
+number_sections: yes
+toc: yes
+toc_depth: 2
 ---
 
 This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
 
 Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*.
 
-This is my first attempt at Kaggle and writing a full data project. Please reach out with any
+# Introduction
+
+This is my first attempt at Kaggle and writing a full data project. I focuss here on feature Engineering,
+my next Kernal will take more of a look at the modelling and diagnostic side. Please reach out with any
 questions or advice, I'm here to learn and build my network!
+
+## Loading libraries and data
 
 ```{r}
 # Loading libraries
@@ -20,11 +33,420 @@ library(mice) #imputing variables
 library(randomForest) #modelling
 library(caret) #modelling
 
+if(!file.exists("./TitanicTrain.csv")) {
+        download.file("https://storage.googleapis.com/kaggle-competitions-data/kaggle/3136/train.csv?GoogleAccessId=competitions-data@kaggle-161607.iam.gserviceaccount.com&Expires=1508658187&Signature=WhwpAndrqdR7rqX8bgE9ynM1FPu9ihthWIMf%2Bz8ualnljh1RCDW9dLGVENX%2BdHw7YfY3jzuAV5ao4MFPzwnwkYCapqZYzAFgRqa4A%2BxIZZNjFlzocPjI6JIKxCsOw9WM7t3PahD7oZJHmVNHDan66VCx1WPb7v6t%2FiHR9LzQCFKpQbD3ceiU6bN1mT8ECmCH9gjcrgiDqGADMf0GRK%2BmsHKoTWCnnqNBh8UIi1aYFIcL3xF5SNJGC91P35lu5b8t4wSJLNuNhA05I823a3RbmoF2Rmk4LzIhm9Uv52OVXUcFG36TesdtmaJSLYCNUEYaXt9DeK%2B2vQF55BoT2YI5JQ%3D%3D","./TitanicTrain.csv",method = "curl")}
 
+if(!file.exists("./TitanicTest.csv")) {
+        download.file("https://storage.googleapis.com/kaggle-competitions-data/kaggle/3136/test.csv?GoogleAccessId=competitions-data@kaggle-161607.iam.gserviceaccount.com&Expires=1508658217&Signature=dvuLq8iI%2B5KTGzsUnkU%2Fxraxrcq197tIcGtDRAJijJhDImPrTQI0eo6ryXfd9yxcjbFr8QkXN%2FiyKKrZSfm9BVR9R%2BGpqeGZgq%2F8kdTrMc9AuDzg2HsQHTqCXrUGROpHGp7xlWo8qM160m9Rr4jG6hldzWLlmugcvN37q%2BfJYrMf0%2F9XGwDj76S6hUbgAZ6RoBOwUtBzH8CXErufmoOVpPFrZ0Ey9rSZ5jK8UCbGS58TsmkytHMZvjYdXYZGEtbeTZDzZAWap0Vqd6%2FnTgx0n35NyC1uRJ0vUzfAAb2qyvLCxr1WhVVaiLpPKkYWrOMUQyCZP6J0GHZz1GJgq1VYnA%3D%3D","./TitanicTest.csv",method = "curl")}
+
+traindata <- read.csv("./TitanicTrain.csv",stringsAsFactors = FALSE)
+testdata <- read.csv("./TitanicTest.csv",stringsAsFactors = FALSE)
+
+c(object.size(traindata),object.size(testdata)) ## data is small so performance shouldn't be an issue
+
+## I want to combine training and test sets because this makes it easier to perform the same 
+## operations on both sets
+
+testdata$Survived <- "NA"
+merged <- rbind(traindata,testdata)
+
+length(unique(merged$PassengerId)) == length(merged$PassengerId) ## check no duped entries
+```
+
+# Pre Clean Exploratory Data Analysis
+
+I find it useful to guess what I think the data will look like, as this gives me a benchmark to 
+either support or attack in my initial analysis. Intuitively I would guess that anyone of higher
+class, either by ticket class itself or cost, would have a better chance of survival, as would
+women, children, and the elderly. Perhaps families too would be given a better chance of all getting
+into a lifeboat together as opposed to someone travelling alone?
+
+```{r}
+head(merged) ## for detailed impormation about features check here https://www.kaggle.com/c/titanic/data
+colSums(is.na(merged))
+colSums(merged=="")
 ```
 
 
+So there seems to be a lot of data missing in the Age variable and I would guess this contains a 
+lot of information. I have seen other people trying to impute age (use the mean for example) but 
+this is too much of a fudge for me and I'd rather train two models, one with age and one without.
 
-Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+Let's look at charts of survivor trends by age, class, gender
 
-When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file).
+## Class & Sex
+
+```{r}
+merged$Pclass <- as.factor(merged$Pclass)
+
+
+g <- ggplot(merged[1:891,], aes(x=Pclass,fill=factor(Survived))) + geom_bar() + labs(fill = "Survived")
+g <- g + labs(title="Survivor split by ticket class")
+g
+
+g <- g + facet_wrap(~Sex) + labs(title="Survivor split by ticket class and gender")
+g
+```
+
+As expected, higher class of ticket and female gender seem to be good positive predictors of survival.
+
+## Age
+
+I would like to segment by age and create a new feature for age bracket as having so many individual ages 
+in the model would probably lead to overfitting.
+
+```{r}
+qplot(merged$Age)
+
+agebrackets <- c(0,13,18,30,55)
+merged$Agebracket <- findInterval(merged$Age,agebrackets)
+
+agetable <- data.frame(Agebracket=c(1,2,3,4,5),Age_range=c("<13","13-17","18-29","30-54","55+"))
+merged <- join(merged,agetable,by="Agebracket")
+merged$Agebracket <- as.factor(merged$Agebracket)
+
+g <- ggplot(merged[1:891,], aes(x=Age_range,fill=factor(Survived))) + geom_bar() + labs(fill = "Survived")
+g <- g + labs(title="Survivor split by age group")
+g
+
+g <- g + facet_wrap(~Sex) + labs(title="Survivor split by age and gender")
+g
+```
+
+Age bracket seems to give a lot of information, with youger generally having a better chance
+of survival. Interestingly elderly women has a very good chance of survival whereas elderly men
+had a very bad chance so it looks like this is a useful division.
+
+
+# Feature Engineering, Cleaning and Completing the Data
+
+As discussed before I intend to split up the data into those with Age data and those without, this 
+seems pretty central. However I want to see if this improves performance so I will do that once I've
+trained and tested a few models on the comibined set. The other variable with many missing entries
+is Cabin. I'm guessing this isn't just missing data, but that a lot of people didn't have a Cabin.
+So I'm thinking of turning this into a 2 factor variable, has / does not have cabin.
+
+## Cabin
+
+```{r}
+head(merged$Cabin,30)
+length(unique(merged$Cabin))/length(merged$Cabin) ## only 14% are unique so there are a lot shared.
+merged$Cabin[28] # this looks strange, multiple cabins on one ticket
+subset(merged,Cabin == "C23 C25 C27") # it was one family, the Fortunes
+
+merged$HasCabin <- as.factor(!(merged$Cabin==""))
+
+g <- ggplot(merged[1:891,], aes(x=HasCabin,fill=factor(Survived))) + geom_bar()
+g <- g +facet_wrap(~Pclass) + labs(title="Survivor split by class and Cabin")
+g
+```
+
+As expected few people in Class 2 and 3 had cabins, but actually those who did had a good chance of 
+survival. Helping to capture the smaller number who survived from lower classes should be very additive.
+
+## Fare
+
+```{r}
+qplot(merged$Fare,bins=150)
+```
+
+There doesn't seem to be natural brackets here unlike age, so I will just
+split in equal groups. There is one missing entry for Fare, I will impute
+the average Fare for his Pclass.
+
+```{r}
+subset(merged,is.na(merged$Fare))
+merged[1044,]$Fare <- mean(subset(merged,Pclass==3)$Fare,na.rm=TRUE)
+
+merged$Farebracket <- as.factor(cut2(merged$Fare,g=5))
+
+g <- ggplot(merged[1:891,], aes(x=Farebracket,fill=factor(Survived))) + geom_bar()
+g <- g +facet_wrap(~Pclass) + labs(title="Survivor split by class and Fare Bracket")
+g <- g + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+g 
+
+head(merged[order(merged$Fare,decreasing = FALSE),]$Fare)
+subset(merged,Fare==0)
+```
+
+This is more useful than expected, it does seem to split out the survivors within
+a class quite nicely.
+
+```{r}
+head(order(merged$Fare,decreasing = TRUE))
+merged[259,]
+
+subset(merged,Fare==merged$Fare[259])
+```
+
+
+One group paid over $500! But is ticket overall cost or each ticket?
+
+Just for fun: from https://en.wikipedia.org/wiki/Titanic_(1997_film) 
+Jack Dawson is actually Joseph Dawson, who is not in our sample,
+and neither is Rose. I didn't need a model to classify them anyway.
+
+```{r}
+grep("Dawson",merged$Name)
+grep("Rose",merged$Name)
+```
+
+## Title
+
+```{r}
+merged$Title <- gsub('(.*, )|(\\..*)', '', merged$Name)
+
+count(merged,Title)
+
+VIP <- c("Capt","Col","Don","Dona","Dr","Jonkheer","Lady","Major",
+         "Mlle", "Mme","Rev","Sir","the Countess")
+
+merged$Title[merged$Title %in% VIP] <- "VIP"
+merged$Title <- as.factor(merged$Title)
+
+count(merged,Title)
+
+## I'm not that keen on only having 2 in the "Ms" camp
+merged[merged$Title=="Ms",]$Title <- "Mrs"
+
+g <- ggplot(merged[1:891,], aes(x=Title,fill=factor(Survived))) + geom_bar()
+g <- g +facet_wrap(~Pclass) + labs(title="Survivor split by class and Title")
+g
+```
+
+I'm not sure how useful this is going to be based on the charts.
+
+## Name
+
+Onto surname, I'm interested to see if there was some racial bias here.
+
+
+```{r}
+library(wru) # who r u - library to guess race from surname
+
+merged$surname<- gsub("([A-Za-z]+).*", "\\1", merged$Name)
+
+predict_race(merged,surname.only = TRUE)
+raceprobs <- predict_race(merged,surname.only = TRUE)[18:22]
+racepreds <- colnames(raceprobs)[apply(raceprobs,1,which.max)]
+merged$Race <- as.factor(sub('.*\\.', '',racepreds))
+
+g <- ggplot(merged[1:891,], aes(x=Race,fill=factor(Survived))) + geom_bar()
+g <- g +facet_wrap(~Pclass) + labs(title="Survivor split by class and Race")
+g
+```
+
+## Ticketsize variable
+
+```{r}
+merged <- ddply(merged,.(Ticket),transform,Ticketsize=length(Ticket))
+merged$Ticketsize <- as.factor(merged$Ticketsize)
+merged <- merged[order(merged$PassengerId),] # ddply mixes up order
+```
+
+## Embarked
+
+```{r}
+count(merged,Embarked) #I'm just going to use the most frequent here ie S
+subset(merged,Embarked == "")
+merged[c(62,830),"Embarked"] <- "S"
+merged$Embarked <- as.factor(merged$Embarked)
+```
+
+## Age
+
+To begin with, I want to use the mice library to impute the missing ages.
+Then I want to check if we get improvement by splitting data as explained
+above; this seems pivtotal to the analysis.
+
+```{r}
+factors <- c("Pclass","Sex","Agebracket","Title")
+set.seed(1234)
+
+mice_ages <- mice(m1[, !names(m1) %in% factors], method='rf')
+mice_out <- complete(mice_ages)
+
+# I am creating a new variable for the imputed ages because I want to later compare to 
+# training a model both for entries with and without ages.
+```
+
+```{r}
+mergedages <- merged[,!names(merged) == "Age_range"]
+mergedages$Age <- mice_out$Age
+
+mergedages$Agebracket <- findInterval(mergedages$Age,agebrackets)
+mergedages <- join(mergedages,agetable,by="Agebracket")
+
+colSums(is.na(mergedages))
+colSums(mergedages=="")
+```
+
+We are ready to start fitting some models!
+
+# Model Fitting
+
+First split the data back into training/ CV and set we use for submission,
+
+```{r}
+mergedagestrain <- mergedages[1:891,]
+mergedagestest <- mergedages[892:1309,]
+mergedagestrain$Survived <- as.factor(traindata$Survived)
+
+set.seed(414)
+inTrain<- createDataPartition(y=mergedagestrain$Survived,p=0.75, list=FALSE)
+train <- mergedagestrain[inTrain,]
+test <- mergedagestrain[-inTrain,]
+```
+
+## Logistic Regression
+
+```{r}
+set.seed(414)
+logreg <- glm(Survived ~ Pclass + Sex + Agebracket +
+                      Farebracket + HasCabin + Ticketsize
+               + Title + Embarked, family = binomial(link=logit), 
+              data = train)
+
+summary(logreg)
+
+prediction <- predict(logreg,newdata=test,type="response")
+prediction <- ifelse(prediction > 0.5,1,0)
+misClasificError <- mean(prediction != test$Survived)
+print(paste('Accuracy',1-misClasificError)) ## Accuracy 81%
+```
+
+## Regularised Logistic Regression using lasso
+
+Let's see if we can improve the model using lasso regularisation
+
+```{r}
+set.seed(414)
+library(glmnet)
+x <- model.matrix(Survived ~ Pclass + Sex + Farebracket + HasCabin + Ticketsize + Embarked + Title,train)
+cv.out <- cv.glmnet(x,y=train$Survived,alpha=1,family="binomial",type.measure = "mse") #select lambda -4
+
+#best value of lambda
+lambda_1se <- cv.out$lambda.1se
+
+xtest <- model.matrix(Survived ~ Pclass + Sex + Farebracket + HasCabin + Ticketsize + Embarked + Title,test)
+lasso_prob <- predict(cv.out,newx = xtest,s=lambda_1se,type="response")
+#translate probabilities to predictions
+
+lasso_predict <- rep("0",nrow(test))
+lasso_predict[lasso_prob>.5] <-"1"
+#confusion matrix
+table(pred=lasso_predict,true=test$Survived)
+
+mean(lasso_predict==test$Survived) #82% accuracy
+```
+
+## Random Forest
+
+```{r}
+set.seed(414)
+rf_model <- randomForest(factor(Survived) ~ Pclass + Sex + Agebracket +
+                                 Farebracket + Race + HasCabin + Ticketsize +
+                                 Embarked + Title,
+                         data = mergedagestrain,na.action = na.pass)
+
+rf_model
+rf_model$confusion
+varImpPlot(rf_model)
+importance(rf_model)
+
+set.seed(414)
+rf_model2 <- randomForest(factor(Survived) ~ Pclass + Sex + Farebracket + HasCabin + Ticketsize + Embarked + Title,
+                         data = mergedagestrain,na.action = na.pass,nodesize=20)
+
+rf_model2 #looks the best
+plot(rf_model2)
+varImpPlot(rf_model2)
+importance(rf_model2)
+```
+
+## GBM
+
+```{r}
+features <- c("Survived","Pclass","Sex","SibSp","Parch","HasCabin","Farebracket","Title","Ticketsize","Age_range")
+fitControl <- trainControl(method = "repeatedcv", number = 4, repeats = 4)
+
+set.seed(414)
+gbm1 <- train(as.factor(Survived) ~ ., data = train[features], 
+              method = "gbm", trControl = fitControl,verbose = FALSE)
+prediction <- predict(gbm1, test[features],type= "prob")
+prediction <- data.frame(ifelse(prediction[,2] > 0.5,1,0))
+mean(prediction[,1] == test$Survived) #82% accuracy
+
+set.seed(414)
+fitControl2 <- trainControl(method = "repeatedcv", number = 6, repeats = 4)
+gbm2 <- train(as.factor(Survived) ~ ., data = train[features], 
+              method = "gbm", trControl = fitControl,verbose = FALSE)
+prediction <- predict(gbm2, test[features],type= "prob")
+prediction <- data.frame(ifelse(prediction[,2] > 0.5,1,0))
+mean(prediction[,1] == test$Survived) #82.5% accuracy
+```
+
+## Splitting models depending on whether age is available or not
+
+```{r}
+row.names(merged) <- merged$PassengerId
+mergedtrain <- merged[1:891,]
+mergedtest <- merged[892:1309,]
+mergedtrain$Survived <- as.factor(mergedtrain$Survived)
+
+sum(is.na(mergedtrain$Age))
+sum(is.na(mergedtest$Age))
+
+
+
+mergedtrain[is.na(mergedtrain$Age),]
+mergedtrain[!is.na(mergedtrain$Age),]
+
+
+rf_model_ages <- randomForest(factor(Survived) ~ Pclass + Sex + Farebracket + HasCabin + Agebracket + Ticketsize + Embarked + Title,
+                              data = mergedtrain[!is.na(mergedtrain$Age),],nodesize=20)
+
+rf_model_ages
+rf_model_ages$confusion
+varImpPlot(rf_model_ages)
+importance(rf_model_ages)
+
+
+rf_model_noages <- randomForest(factor(Survived) ~ Pclass + Sex +
+                                      Farebracket + Race + HasCabin + Ticketsize +
+                                      Embarked + Title,
+                              data = mergedtrain[is.na(mergedtrain$Age),],nodesize=20)
+
+rf_model_noages
+rf_model_noages$confusion
+varImpPlot(rf_model_noages)
+importance(rf_model_noages)
+
+p1 <- predict(rf_model_ages, mergedtest[!is.na(mergedtest$Age),])
+p2 <- predict(rf_model_noages, mergedtest[is.na(mergedtest$Age),])
+prediction <- join(data.frame(PassengerId=names(p1),Survived=p1),data.frame(PassengerId=names(p2),Survived=p2))
+
+# This actually didn't help my position on the leaderboard, pretty surprised by this
+```
+
+# Evaluation and submission
+
+The model rf2 looks the best so I will submit that.
+
+```{r}
+prediction <- predict(rf_model2, mergedagestest)
+submission <- data.frame(PassengerId=names(prediction),Survived=prediction)
+if(!file.exists("./predictions.csv")) {
+        write.csv(submission, file = "./predictions.csv",row.names = F)}
+```
+
+This submission got me into the top 6% which I was very pleased with for my first attempt.
+
+I am a little puzzled how many of my intuitions were wrong, that splitting age into two models would
+make a big difference, and the clearly crucial feature "Title" would not have much impact.
+
+For my next project I want to take a more purposeful approach to model selection, with a more
+extensive evaluation and diagnostics for parameter tuning. I also want to work on seeing how
+feature engineering and model selection work in concert with each other.
+
+Thanks for reading, if you've got this far surely its worth an upvote :)
