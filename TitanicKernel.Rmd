@@ -3,8 +3,8 @@ title: 'Titanic: an Introduction to Feature Engineering'
 author: "Harry Emeric"
 date: "19 October, 2017"
 output:
-  html_notebook: default
   html_document: default
+  html_notebook: default
 theme: united
 number_sections: yes
 toc: yes
@@ -17,9 +17,9 @@ Try executing this chunk by clicking the *Run* button within the chunk or by pla
 
 # Introduction
 
-This is my first attempt at Kaggle and writing a full data project. I focuss here on feature Engineering,
-my next Kernal will take more of a look at the modelling and diagnostic side. Please reach out with any
-questions or advice, I'm here to learn and build my network!
+This is my first attempt at Kaggle and writing a full data project. I focuss here on Feature Engineering,
+my next Kernel will take more of a look at the modelling and diagnostic side. Please reach out with any
+questions or advice, I'm here to learn and build my network.
 
 ## Loading libraries and data
 
@@ -55,14 +55,16 @@ length(unique(merged$PassengerId)) == length(merged$PassengerId) ## check no dup
 
 # Pre Clean Exploratory Data Analysis
 
-I find it useful to guess what I think the data will look like, as this gives me a benchmark to 
+I find it useful to guess what I think data will look like, as this gives me a benchmark to 
 either support or attack in my initial analysis. Intuitively I would guess that anyone of higher
 class, either by ticket class itself or cost, would have a better chance of survival, as would
 women, children, and the elderly. Perhaps families too would be given a better chance of all getting
 into a lifeboat together as opposed to someone travelling alone?
 
+For detailed impormation about features check here https://www.kaggle.com/c/titanic/data
+
 ```{r}
-head(merged) ## for detailed impormation about features check here https://www.kaggle.com/c/titanic/data
+head(merged)
 colSums(is.na(merged))
 colSums(merged=="")
 ```
@@ -165,12 +167,14 @@ g <- g +facet_wrap(~Pclass) + labs(title="Survivor split by class and Fare Brack
 g <- g + theme(axis.text.x = element_text(angle = 90, hjust = 1))
 g 
 
-head(merged[order(merged$Fare,decreasing = FALSE),]$Fare)
 subset(merged,Fare==0)
 ```
 
 This is more useful than expected, it does seem to split out the survivors within
-a class quite nicely.
+a class quite nicely. There were 17 people who paid 0 fare including some in first
+class - I don't think its worth creating a separate category here though.
+
+One group paid over $500! But is ticket overall cost or each ticket?
 
 ```{r}
 head(order(merged$Fare,decreasing = TRUE))
@@ -180,15 +184,13 @@ subset(merged,Fare==merged$Fare[259])
 ```
 
 
-One group paid over $500! But is ticket overall cost or each ticket?
-
 Just for fun: from https://en.wikipedia.org/wiki/Titanic_(1997_film) 
 Jack Dawson is actually Joseph Dawson, who is not in our sample,
 and neither is Rose. I didn't need a model to classify them anyway.
 
 ```{r}
 grep("Dawson",merged$Name)
-grep("Rose",merged$Name)
+merged[grep("Rose",merged$Name),]
 ```
 
 ## Title
@@ -226,8 +228,7 @@ library(wru) # who r u - library to guess race from surname
 
 merged$surname<- gsub("([A-Za-z]+).*", "\\1", merged$Name)
 
-predict_race(merged,surname.only = TRUE)
-raceprobs <- predict_race(merged,surname.only = TRUE)[18:22]
+raceprobs <- predict_race(merged,surname.only = TRUE)
 racepreds <- suppressWarnings(colnames(raceprobs)[apply(raceprobs,1,which.max)])
 merged$Race <- as.factor(sub('.*\\.', '',racepreds))
 
@@ -236,7 +237,11 @@ g <- g +facet_wrap(~Pclass) + labs(title="Survivor split by class and Race")
 g
 ```
 
+It looks like such a high proportion is white that this will be of little use.
+
 ## Ticketsize variable
+
+Create a variable for number of people on a single tickt to give a count for group size.
 
 ```{r}
 merged <- ddply(merged,.(Ticket),transform,Ticketsize=length(Ticket))
@@ -246,8 +251,10 @@ merged <- merged[order(merged$PassengerId),] # ddply mixes up order
 
 ## Embarked
 
+Move the two cases where this is unmarked to the modal case, "S"
+
 ```{r}
-count(merged,Embarked) #I'm just going to use the most frequent here ie S
+count(merged,Embarked)
 subset(merged,Embarked == "")
 merged[c(62,830),"Embarked"] <- "S"
 merged$Embarked <- as.factor(merged$Embarked)
@@ -263,6 +270,7 @@ above; this seems pivtotal to the analysis.
 factors <- c("Pclass","Sex","Agebracket","Title")
 set.seed(1234)
 
+m1 <- merged[, !names(merged) %in% c("Agebracket","Age_range")]
 mice_ages <- mice(m1[, !names(m1) %in% factors], method='rf')
 mice_out <- complete(mice_ages)
 
@@ -397,12 +405,6 @@ mergedtrain$Survived <- as.factor(mergedtrain$Survived)
 
 sum(is.na(mergedtrain$Age))
 sum(is.na(mergedtest$Age))
-
-
-
-mergedtrain[is.na(mergedtrain$Age),]
-mergedtrain[!is.na(mergedtrain$Age),]
-
 
 rf_model_ages <- randomForest(factor(Survived) ~ Pclass + Sex + Farebracket + HasCabin + Agebracket + Ticketsize + Embarked + Title,
                               data = mergedtrain[!is.na(mergedtrain$Age),],nodesize=20)
