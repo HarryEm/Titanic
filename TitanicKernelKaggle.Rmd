@@ -72,12 +72,14 @@ Let's look at charts of survivor trends by age, class, gender
 merged$Pclass <- as.factor(merged$Pclass)
 merged$Sex <- as.factor(merged$Sex)
 
-g <- ggplot(merged[1:891,], aes(x=Pclass,fill=factor(Survived))) + geom_bar() + labs(fill = "Survived")
+g <- ggplot(merged[1:891,], aes(x=Pclass, fill=factor(Survived))) + geom_bar(position = "dodge") + labs(fill = "Survived")
 g <- g + labs(title="Survivor split by ticket class")
 g
 
 g <- g + facet_wrap(~Sex) + labs(title="Survivor split by ticket class and gender")
 g
+
+
 ```
 
 As expected, higher class of ticket and female gender seem to be good positive predictors of survival.

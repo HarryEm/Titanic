@@ -12,15 +12,21 @@ toc_depth: 2
 
 # Introduction
 
-Here I build on my previous Kernel (please see link below) to compare two different approaches to deadling with missing data. Namely, I would like to test whether by instead of imputing missing data, training a separate model for each combintaion of observed variables, I improve my predictive accuracy.
+Here I build on my previous Kernel (please see link below) to compare two different approaches to deadling with missing data. Namely, I would like to test whether instead of imputing missing data, training a separate model for each combintaion of observed variables, I improve my predictive accuracy. I made a start on this previously by doing this just for the "Age" variable, and found that it did not improve accuracy, although this could be due to lost information by binning "Age" into brackets. In this work I look to generalise this approach to all variables.
 
 https://www.kaggle.com/harryem/feature-engineering-on-the-titanic-for-0-81339
+
+## Formal delineation of the problem
+
+Given test features $X_{TEST} \in /R^{n * k}$ is a matrix of n test examples and k features and vector $y_{TEST} \in \{0,1\}^n$ classifying survived (1) or did not survive (0), our aim is to estimate a function f such that $y = f(x)$ which minimises misclassification, that is $$ min \sum_{i=1}^{n}(y_i - f(x_i))^2$$ where $f(x_i)$ is the prediction for the ith test example and $y_i$ is the ith classification, which is known only by the Kaggle administrators.
 
 ## Loading libraries and data
 
 ```{r,message=FALSE}
 # Loading libraries
 library(ggplot2) #charting
+library(scales) #charting
+library(grid) #charting
 library(plyr) #data wrangling
 library(dplyr) #data wrangling
 library(Hmisc) #data wrangling
@@ -45,12 +51,6 @@ length(unique(merged$PassengerId)) == length(merged$PassengerId) ## check no dup
 
 # Pre Clean Exploratory Data Analysis
 
-I find it useful to guess what I think data will look like, as this gives me a benchmark to 
-either support or attack in my initial analysis. Intuitively I would guess that anyone of higher
-class, either by ticket class itself or cost, would have a better chance of survival, as would
-women, children, and the elderly. Perhaps families too would be given a better chance of all getting
-into a lifeboat together as opposed to someone travelling alone?
-
 For detailed impormation about features check here https://www.kaggle.com/c/titanic/data
 
 ```{r}
@@ -59,12 +59,9 @@ colSums(is.na(merged))
 colSums(merged=="")
 ```
 
+There is missing data in the Age, Fare, Cabin and Embarked varibles, and the aim of this piece is to explore and contrast various ways of approaching this issue.
 
-So there seems to be a lot of data missing in the Age variable and I would guess this contains a 
-lot of information. I have seen other people trying to impute age (use the mean for example) but 
-this is too much of a fudge for me and I'd rather train two models, one with age and one without.
-
-Let's look at charts of survivor trends by age, class, gender
+First tet's review the charts of survivor trends by age, class, gender.
 
 ## Class & Sex
 
@@ -72,7 +69,7 @@ Let's look at charts of survivor trends by age, class, gender
 merged$Pclass <- as.factor(merged$Pclass)
 merged$Sex <- as.factor(merged$Sex)
 
-g <- ggplot(merged[1:891,], aes(x=Pclass,fill=factor(Survived))) + geom_bar() + labs(fill = "Survived")
+g <- ggplot(merged[1:891,], aes(x=Pclass,fill=factor(Survived))) + geom_bar(pos  = "dodge") + labs(fill = "Survived")
 g <- g + labs(title="Survivor split by ticket class")
 g
 
@@ -97,9 +94,17 @@ agetable <- data.frame(Agebracket=c(1,2,3,4,5),Age_range=c("<13","13-17","18-29"
 merged <- join(merged,agetable,by="Agebracket")
 merged$Agebracket <- as.factor(merged$Agebracket)
 
-g <- ggplot(merged[1:891,], aes(x=Age_range,fill=factor(Survived))) + geom_bar() + labs(fill = "Survived")
-g <- g + labs(title="Survivor split by age group")
-g
+g1 <- ggplot(merged[1:891,], aes(x=Age_range,fill=factor(Survived))) + geom_bar(pos="dodge") + labs(fill = "Survived")
+g1 <- g1 + labs(title="Survivor split by age group") + theme(axis.text.x=element_blank())
+
+g2 <- ggplot(merged[1:891,], aes(x=Age_range,fill=factor(Survived))) + geom_bar(pos="fill") + labs(fill = "Survived")
+g2 <- g2 + labs(title="Survivor split by age group - Normalised")
+
+vp <- viewport(width = 0.25, height = 0.25, x = 0.8,
+     y = 0.8)
+
+print(g2)
+print(g1,vp=g2)
 
 g <- g + facet_wrap(~Sex) + labs(title="Survivor split by age and gender")
 g
