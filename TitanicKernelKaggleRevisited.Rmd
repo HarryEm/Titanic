@@ -61,6 +61,27 @@ colSums(merged=="")
 
 There is missing data in the Age, Fare, Cabin and Embarked varibles, and the aim of this piece is to explore and contrast various ways of approaching this issue.
 
+We need to add a field classifying which data are missing
+
+```{r}
+a <- colSums(is.na(testdata))+colSums(testdata=="")
+a <- names(a[is.na(a)|a!=0])
+
+missing <- paste(as.integer(!is.na(merged$Age)^!merged$Age==""),
+as.integer(!is.na(merged$Fare)^!merged$Fare==""),
+as.integer(!is.na(merged$Fare)^!merged$Cabin==""),sep="")
+
+table(missing)
+merged$Missing <- missing
+
+merged[missing=="100",]
+
+```
+
+0 means missing and 1 means observed, so for example "010" means Age was observed, Fare was not, and Cabin was.
+
+There are five different combinations of missing variables in the data, so the approach will be to loop over these and train five models.
+
 First tet's review the charts of survivor trends by age, class, gender.
 
 ## Class & Sex
