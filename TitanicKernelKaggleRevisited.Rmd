@@ -1,7 +1,7 @@
 ---
 title: 'Titanic: Comparing Two Approaches for Missing Data'
 author: "Harry Emeric"
-date: "24 November, 2017"
+date: "26 November, 2017"
 output: 
         html_notebook: default
 theme: united
@@ -12,7 +12,7 @@ toc_depth: 2
 
 # Introduction
 
-Here I build on my previous Kernel (please see link below) to compare two different approaches to deadling with missing data. Namely, I would like to test whether instead of imputing missing data, training a separate model for each combintaion of observed variables, I improve my predictive accuracy. I made a start on this previously by doing this just for the "Age" variable, and found that it did not improve accuracy, although this could be due to lost information by binning "Age" into brackets. In this work I look to generalise this approach to all variables.
+Here I build on my previous Kernel (please see link below) to compare two different approaches to dealing with missing data. The first approach is to impute missing data, for example making a prediction from the available variables. The second method is to train a separate model for each comination of missing fields we observe in the dataset. My aim is to see which approach has higher predictive accuracy. I made a start on this previously by doing this just for the "Age" variable, and found that it did not improve accuracy, although this could be due to lost information by binning "Age" into brackets. In this work I look to generalise this approach to all variables.
 
 https://www.kaggle.com/harryem/feature-engineering-on-the-titanic-for-0-81339
 
@@ -22,8 +22,9 @@ Given test features $X_{TEST} \in /R^{n * k}$ is a matrix of n test examples and
 
 ## Loading libraries and data
 
+Loading libraries
+
 ```{r,message=FALSE}
-# Loading libraries
 library(ggplot2) #charting
 library(scales) #charting
 library(grid) #charting
@@ -38,18 +39,19 @@ library(caret) #modelling
 traindata <- read.csv('../input/train.csv', stringsAsFactors = F)
 testdata <- read.csv('../input/test.csv', stringsAsFactors = F)
 
-c(object.size(traindata),object.size(testdata)) ## data is small so performance shouldn't be an issue
+c(object.size(traindata),object.size(testdata)) 
 
-## I want to combine training and test sets because this makes it easier to perform the same 
-## operations on both sets
+# data is small so performance shouldn't be an issue
+
+# I want to combine training and test sets because this makes it easier to perform the # same operations on both sets
 
 testdata$Survived <- "NA"
 merged <- rbind(traindata,testdata)
 
-length(unique(merged$PassengerId)) == length(merged$PassengerId) ## check no duped entries
+length(unique(merged$PassengerId)) == length(merged$PassengerId) # check no duped entries
 ```
 
-# Pre Clean Exploratory Data Analysis
+# Initial Data Wrangling and Exploratory Data Analysis
 
 For detailed impormation about features check here https://www.kaggle.com/c/titanic/data
 
@@ -61,28 +63,31 @@ colSums(merged=="")
 
 There is missing data in the Age, Fare, Cabin and Embarked varibles, and the aim of this piece is to explore and contrast various ways of approaching this issue.
 
-We need to add a field classifying which data are missing
+We need to add a field classifying which data are missing for each element.
 
 ```{r}
 a <- colSums(is.na(testdata))+colSums(testdata=="")
 a <- names(a[is.na(a)|a!=0])
+a
 
-missing <- paste(as.integer(!is.na(merged$Age)^!merged$Age==""),
-as.integer(!is.na(merged$Fare)^!merged$Fare==""),
-as.integer(!is.na(merged$Fare)^!merged$Cabin==""),sep="")
+missing <- c("")
 
-table(missing)
-merged$Missing <- missing
+for (i in a) {
+  missing <- paste(missing,as.integer(!is.na(merged[i])^!merged[i]==""),sep="")
+                 }
 
 merged[missing=="100",]
 
+table(missing)
+merged$Missing <- missing
 ```
 
-0 means missing and 1 means observed, so for example "010" means Age was observed, Fare was not, and Cabin was.
+0 means missing and 1 means observed, so for example "100" means Age was observed, Fare and Cabin were not.
 
 There are five different combinations of missing variables in the data, so the approach will be to loop over these and train five models.
 
-First tet's review the charts of survivor trends by age, class, gender.
+
+First let's review the charts of survivor trends by age, class, gender.
 
 ## Class & Sex
 
@@ -90,11 +95,31 @@ First tet's review the charts of survivor trends by age, class, gender.
 merged$Pclass <- as.factor(merged$Pclass)
 merged$Sex <- as.factor(merged$Sex)
 
-g <- ggplot(merged[1:891,], aes(x=Pclass,fill=factor(Survived))) + geom_bar(pos  = "dodge") + labs(fill = "Survived")
-g <- g + labs(title="Survivor split by ticket class")
-g
+g <- ggplot(merged[1:891,], aes(x=Pclass,fill=factor(Survived))) + geom_bar(pos  = "dodge") + labs(fill = "Survived",title="Survivor split by ticket class")
 
-g <- g + facet_wrap(~Sex) + labs(title="Survivor split by ticket class and gender")
+dftemp <- merged[1:891,] %>%
+    group_by(Pclass) %>%
+    summarise(Survive = sum(Survived == 1) / n(),
+              DidNotSurvive = sum(Survived == 0) / n()) %>%
+    gather(key = Group,value = Surv,Survive:DidNotSurvive)
+
+gn <- ggplot(dftemp, aes(x = Pclass,
+                            y = Surv, 
+                            fill = as.factor(Group))) + 
+    geom_bar(position = "dodge",stat = "identity") + 
+    scale_y_continuous(labels = percent_format()) +
+    labs(y = "Proportion Survived",title="Survivor split by ticket class - Normalised") +
+    theme(legend.title=element_blank())
+
+
+vp <- viewport(width = 0.3, height = 0.3, x = 0.85,
+     y = 0.85)
+
+print(gn)
+theme_set(theme_bw(base_size = 8))
+print(g,vp=vp)
+
+g <- ggplot(merged[1:891,], aes(x=Pclass,fill=factor(Survived))) + geom_bar(pos  = "fill") + facet_wrap(~Sex) + labs(y = "Proportion Survived",fill = "Survived",title="Survivor split by ticket class and gender")
 g
 ```
 
@@ -102,11 +127,10 @@ As expected, higher class of ticket and female gender seem to be good positive p
 
 ## Age
 
-I would like to segment by age and create a new feature for age bracket as having so many individual ages 
-in the model would probably lead to overfitting.
+I would like to segment by age and create a new feature for age bracket for visualisation, and to see if this improves model performance relative to using individual ages.
 
 ```{r}
-qplot(merged$Age)
+qplot(merged$Age,fill=I("red"))
 
 agebrackets <- c(0,13,18,30,55)
 merged$Agebracket <- findInterval(merged$Age,agebrackets)
@@ -115,19 +139,30 @@ agetable <- data.frame(Agebracket=c(1,2,3,4,5),Age_range=c("<13","13-17","18-29"
 merged <- join(merged,agetable,by="Agebracket")
 merged$Agebracket <- as.factor(merged$Agebracket)
 
-g1 <- ggplot(merged[1:891,], aes(x=Age_range,fill=factor(Survived))) + geom_bar(pos="dodge") + labs(fill = "Survived")
-g1 <- g1 + labs(title="Survivor split by age group") + theme(axis.text.x=element_blank())
+g <- ggplot(merged[1:891,], aes(x=Age_range,fill=factor(Survived))) + geom_bar(pos="dodge") + labs(fill = "Survived") + labs(title="Survivor split by age group")
 
-g2 <- ggplot(merged[1:891,], aes(x=Age_range,fill=factor(Survived))) + geom_bar(pos="fill") + labs(fill = "Survived")
-g2 <- g2 + labs(title="Survivor split by age group - Normalised")
+dftemp <- merged[1:891,] %>%
+    group_by(Age_range) %>%
+    summarise(Survive = sum(Survived == 1) / n(),
+              DidNotSurvive = sum(Survived == 0) / n()) %>%
+    gather(key = Group,value = Surv,Survive:DidNotSurvive)
 
-vp <- viewport(width = 0.25, height = 0.25, x = 0.8,
-     y = 0.8)
+gn <- ggplot(dftemp, aes(x = Age_range,
+                            y = Surv, 
+                            fill = as.factor(Group))) + 
+    geom_bar(position = "dodge",stat = "identity") + 
+    scale_y_continuous(labels = percent_format()) +
+    labs(y = "Proportion Survived",title="Survivor split by age group - Normalised") +
+    theme(legend.title=element_blank())
 
-print(g2)
-print(g1,vp=g2)
+vp <- viewport(width = 0.3, height = 0.3, x = 0.85,
+     y = 0.85)
 
-g <- g + facet_wrap(~Sex) + labs(title="Survivor split by age and gender")
+print(gn)
+theme_set(theme_bw(base_size = 8))
+print(g,vp=vp)
+
+g <- ggplot(merged[1:891,], aes(x=Age_range,fill=factor(Survived))) + geom_bar(pos="fill") + labs(y = "Proportion Survived",fill = "Survived",title="Survivor split by age and gender - Normalized") + facet_wrap(~Sex)
 g
 ```
 
@@ -138,11 +173,11 @@ had a very bad chance so it looks like this is a useful division.
 
 # Feature Engineering, Cleaning and Completing the Data
 
-As discussed before I intend to split up the data into those with Age data and those without, this 
-seems pretty central. However I want to see if this improves performance so I will do that once I've
-trained and tested a few models on the comibined set. The other variable with many missing entries
-is Cabin. I'm guessing this isn't just missing data, but that a lot of people didn't have a Cabin.
-So I'm thinking of turning this into a 2 factor variable, has / does not have cabin.
+I now need to impute the missing data for that analysis, as I already have the pre imputation field "Missing" I can subset the data based on the what was originally missing. Each new feature is based off a single feature in the original data, so we can map that according to the "Missing" field.
+
+The Cabin variable has many missing entries. I'm guessing this isn't just missing data, but that a lot of people didn't have a Cabin. So I shall turning this into a 2 factor variable, has / does not have cabin.
+
+In my previous work I binned some of the variables together for fear of overfitting. However I saw little evidence of overfitting, for example that regularizing the logistic regression model provided very little improvement. As such I will avoid binning variables such as Age and Title, apart from for visualisation purposes.
 
 ## Cabin
 
@@ -156,7 +191,17 @@ merged$HasCabin <- as.factor(!(merged$Cabin==""))
 
 g <- ggplot(merged[1:891,], aes(x=HasCabin,fill=factor(Survived))) + geom_bar()
 g <- g +facet_wrap(~Pclass) + labs(title="Survivor split by class and Cabin")
-g
+
+gn <- ggplot(merged[1:891,], aes(x=HasCabin,fill=factor(Survived))) + geom_bar(pos="fill")
+gn <- gn +facet_wrap(~Pclass) +labs(y = "Proportion Survived",fill = "Survived",title="Survivor split by class and Cabin - Normalized")
+
+vp <- viewport(width = 0.35, height = 0.35, x = 0.85,
+     y = 0.85)
+
+print(gn)
+theme_set(theme_bw(base_size = 8))
+print(g,vp=vp)
+
 ```
 
 As expected few people in Class 2 and 3 had cabins, but actually those who did had a good chance of 
@@ -165,7 +210,7 @@ survival. Helping to capture the smaller number who survived from lower classes 
 ## Fare
 
 ```{r}
-qplot(merged$Fare,bins=150)
+qplot(merged$Fare,bins=150,fill=I("red"))
 ```
 
 There doesn't seem to be natural brackets here unlike age, so I will just
@@ -173,13 +218,14 @@ split in equal groups. There is one missing entry for Fare, I will impute
 the average Fare for his Pclass.
 
 ```{r}
-subset(merged,is.na(merged$Fare))
-merged[1044,]$Fare <- mean(subset(merged,Pclass==3)$Fare,na.rm=TRUE)
+a <- subset(merged,is.na(merged$Fare))
+a
+merged[a[,1],]$Fare <- mean(subset(merged,Pclass==3)$Fare,na.rm=TRUE)
 
 merged$Farebracket <- as.factor(cut2(merged$Fare,g=5))
 
-g <- ggplot(merged[1:891,], aes(x=Farebracket,fill=factor(Survived))) + geom_bar()
-g <- g +facet_wrap(~Pclass) + labs(title="Survivor split by class and Fare Bracket")
+g <- ggplot(merged[1:891,], aes(x=Farebracket,fill=factor(Survived))) + geom_bar(pos="fill")
+g <- g +facet_wrap(~Pclass) + labs(y = "Proportion Survived",fill = "Survived",title="Survivor split by class and Fare Bracket - Normalized")
 g <- g + theme(axis.text.x = element_text(angle = 90, hjust = 1))
 g 
 
@@ -190,7 +236,7 @@ This is more useful than expected, it does seem to split out the survivors withi
 a class quite nicely. There were 17 people who paid 0 fare including some in first
 class - I don't think its worth creating a separate category here though.
 
-One group paid over $500! But is ticket overall cost or each ticket?
+One group paid over $500.
 
 ```{r}
 head(order(merged$Fare,decreasing = TRUE))
@@ -199,61 +245,33 @@ merged[259,]
 subset(merged,Fare==merged$Fare[259])
 ```
 
-
-Just for fun: from https://en.wikipedia.org/wiki/Titanic_(1997_film) 
-Jack Dawson is actually Joseph Dawson, who is not in our sample,
-and neither is Rose. I didn't need a model to classify them anyway.
-
-```{r}
-grep("Dawson",merged$Name)
-merged[grep("Rose",merged$Name),]
-```
-
 ## Title
+
 
 ```{r}
 merged$Title <- gsub('(.*, )|(\\..*)', '', merged$Name)
 
 count(merged,Title)
 
-VIP <- c("Capt","Col","Don","Dona","Dr","Jonkheer","Lady","Major",
-         "Mlle", "Mme","Rev","Sir","the Countess")
-
-merged$Title[merged$Title %in% VIP] <- "VIP"
 merged$Title <- as.factor(merged$Title)
 
-count(merged,Title)
+a <- count(merged,Title)
+a
 
-## I'm not that keen on only having 2 in the "Ms" camp
-merged[merged$Title=="Ms",]$Title <- "Mrs"
+a <- a[a$n>2,]$Title
+dftemp <- merged[1:891,]
+dftemp <- dftemp[dftemp$Title %in% a,]
 
-g <- ggplot(merged[1:891,], aes(x=Title,fill=factor(Survived))) + geom_bar()
-g <- g +facet_wrap(~Pclass) + labs(title="Survivor split by class and Title")
+g <- ggplot(dftemp, aes(x=Title,fill=factor(Survived))) + geom_bar(pos="fill")
+g <- g +facet_wrap(~Pclass) + labs(y = "Proportion Survived",fill = "Survived",title="Survivor split by class and Title - Normalized")
 g
 ```
 
-I'm not sure how useful this is going to be based on the charts.
+This does appear to be useful on the normalized scale.
 
 ## Name
 
-Onto surname, I'm interested to see if there was some racial bias here.
-
-
-```{r,message=FALSE}
-library(wru) # who r u - library to guess race from surname
-
-merged$surname<- gsub("([A-Za-z]+).*", "\\1", merged$Name)
-
-raceprobs <- predict_race(merged,surname.only = TRUE)
-racepreds <- suppressWarnings(colnames(raceprobs)[apply(raceprobs,1,which.max)])
-merged$Race <- as.factor(sub('.*\\.', '',racepreds))
-
-g <- ggplot(merged[1:891,], aes(x=Race,fill=factor(Survived))) + geom_bar()
-g <- g +facet_wrap(~Pclass) + labs(title="Survivor split by class and Race")
-g
-```
-
-It looks like such a high proportion is white that this will be of little use.
+This added very little to my prior analysis so I will omit here.
 
 ## Ticketsize variable
 
@@ -278,9 +296,7 @@ merged$Embarked <- as.factor(merged$Embarked)
 
 ## Age
 
-To begin with, I want to use the mice library to impute the missing ages.
-Then I want to check if we get improvement by splitting data as explained
-above; this seems pivtotal to the analysis.
+To begin with, I want to use the mice library to impute the missing ages. Then I want to check if we get improvement by splitting data as explained above. One issue with using other variables to impute missing data is that the variables used in that model are then double counted for those entries.
 
 ```{r}
 factors <- c("Pclass","Sex","Agebracket","Title")
