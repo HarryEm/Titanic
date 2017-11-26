@@ -70,7 +70,7 @@ a <- colSums(is.na(testdata))+colSums(testdata=="")
 a <- names(a[is.na(a)|a!=0])
 a
 
-missing <- c("")
+missing <- c()
 
 for (i in a) {
   missing <- paste(missing,as.integer(!is.na(merged[i])^!merged[i]==""),sep="")
@@ -245,6 +245,15 @@ merged[259,]
 subset(merged,Fare==merged$Fare[259])
 ```
 
+```{r}
+g <- ggplot(merged[1:891,],aes(x=Fare,y=Age,shape=factor(Survived),color=factor(Survived))) + geom_point() + scale_shape_manual(values=c(1,3)) + xlim(0, 300)
+
+g <- g +facet_wrap(~Pclass) + labs(fill="Survived",title="Survival scatterplot of Fare and Age, Split by Class")
+g
+```
+
+This is a useful chart and shows some clustering of survivors in Class 2 who have low Age and Fare.
+
 ## Title
 
 
@@ -299,132 +308,125 @@ merged$Embarked <- as.factor(merged$Embarked)
 To begin with, I want to use the mice library to impute the missing ages. Then I want to check if we get improvement by splitting data as explained above. One issue with using other variables to impute missing data is that the variables used in that model are then double counted for those entries.
 
 ```{r}
-factors <- c("Pclass","Sex","Agebracket","Title")
-set.seed(1234)
-
 m1 <- merged[, !names(merged) %in% c("Agebracket","Age_range")]
-mice_ages <- mice(m1[, !names(m1) %in% factors], method='rf')
-mice_out <- complete(mice_ages)
+mice_ages <- mice(m1[, !names(m1) %in% c('PassengerId','Name','Ticket','Cabin','Family','Surname','Survived','Missing')], method='rf',seed = 1234)
+mice_out <- mice::complete(mice_ages)
 
-# I am creating a new variable for the imputed ages because I want to later compare to 
-# training a model both for entries with and without ages.
-```
+merged$Age <- mice_out$Age
+merged$Agebracket <- findInterval(merged$Age,agebrackets)
+merged <- join(merged,agetable,by="Agebracket")
 
-```{r}
-mergedages <- merged[,!names(merged) == "Age_range"]
-mergedages$Age <- mice_out$Age
+colSums(is.na(merged))+colSums(merged=="")
 
-mergedages$Agebracket <- findInterval(mergedages$Age,agebrackets)
-mergedages <- join(mergedages,agetable,by="Agebracket")
-mergedages$Agebracket <- as.factor(mergedages$Agebracket)
-
-colSums(is.na(mergedages))
-colSums(mergedages=="")
 ```
 
 We are ready to start fitting some models!
 
-# Model Fitting
+# Model Fitting and Comparison
 
 First split the data back into training/ CV and set we use for submission,
 
 ```{r}
-mergedagestrain <- mergedages[1:891,]
-mergedagestest <- mergedages[892:1309,]
-mergedagestrain$Survived <- as.factor(traindata$Survived)
+mergedtrain <- merged[1:891,]
+mergedtest <- merged[892:1309,]
+mergedtrain$Survived <- as.factor(traindata$Survived)
 
 set.seed(414)
-inTrain<- createDataPartition(y=mergedagestrain$Survived,p=0.75, list=FALSE)
-train <- mergedagestrain[inTrain,]
-test <- mergedagestrain[-inTrain,]
+inTrain<- createDataPartition(y=mergedtrain$Survived,p=0.75, list=FALSE)
+train <- mergedtrain[inTrain,]
+test <- mergedtrain[-inTrain,]
 ```
 
-## Logistic Regression
+For each of these comparisons I will use random forest models as these were the best performing models in my prior analysis.
+
+## Age Variable and the effect of Grouping
 
 ```{r}
 set.seed(414)
-logreg <- glm(Survived ~ Pclass + Sex + Agebracket +
-                      Farebracket + HasCabin + Ticketsize
-               + Title + Embarked, family = binomial(link=logit), 
-              data = train)
 
-summary(logreg)
+rf_agegroups <- randomForest(factor(Survived) ~ Pclass + Sex + Farebracket + Agebracket + HasCabin + Ticketsize + Embarked + Title,
+                       data = mergedtrain ,na.action = na.pass,nodesize=20)
 
-prediction <- predict(logreg,newdata=test,type="response")
-prediction <- ifelse(prediction > 0.5,1,0)
-misClasificError <- mean(prediction != test$Survived)
-print(paste('Accuracy',1-misClasificError)) ## Accuracy 81%
+rf_agegroups
+
+rf_age <- randomForest(factor(Survived) ~ Pclass + Sex + Farebracket + Age + HasCabin + Ticketsize + Embarked + Title,
+                       data = mergedtrain ,na.action = na.pass,nodesize=20)
+
+rf_age
+rf_age$confusion
+varImpPlot(rf_age)
+importance(rf_age)
 ```
 
-## Regularised Logistic Regression using lasso
+It appears that grouping ages has a negative effect on accuracy, but only slightly.
 
-Let's see if we can improve the model using lasso regularisation
+## Generalised Model fit based on which variables are missing.
+
+This approach references Goodfellow et al. "Deep Learning", information can be found on page 98 under the section entitled "Classification with missing inputs".
+
+http://www.deeplearningbook.org/contents/ml.html
+
+For each combination of missing variables, contained in the "Missing" field, I train a random forest model, and then predict on the test set using the model relevant to each test example's "Missing"" combination.
 
 ```{r}
-set.seed(414)
-library(glmnet)
-x <- model.matrix(Survived ~ Pclass + Sex + Farebracket + HasCabin + Ticketsize + Embarked + Title,train)
-cv.out <- cv.glmnet(x,y=train$Survived,alpha=1,family="binomial",type.measure = "mse") #select lambda -4
 
-#best value of lambda
-lambda_1se <- cv.out$lambda.1se
+unique(merged$Missing)
 
-xtest <- model.matrix(Survived ~ Pclass + Sex + Farebracket + HasCabin + Ticketsize + Embarked + Title,test)
-lasso_prob <- predict(cv.out,newx = xtest,s=lambda_1se,type="response")
-#translate probabilities to predictions
+dftemp <- mergedtrain[,c("Survived","Pclass","Sex","Farebracket","Age","HasCabin","Ticketsize","Embarked","Title","Missing")]
 
-lasso_predict <- rep("0",nrow(test))
-lasso_predict[lasso_prob>.5] <-"1"
-#confusion matrix
-table(pred=lasso_predict,true=test$Survived)
+rf110 <- randomForest(factor(Survived) ~ .,
+                        data = subset(dftemp[,!names(dftemp) %in% c("HasCabin")],dftemp$Missing=="110") , na.action = na.pass,nodesize=20)
 
-mean(lasso_predict==test$Survived) #82% accuracy
+rf111 <- randomForest(factor(Survived) ~ .,
+                        data = subset(dftemp[,!names(dftemp) %in% c()],dftemp$Missing=="111") , na.action = na.pass,nodesize=20)
+
+rf010 <- randomForest(factor(Survived) ~ .,
+                        data = subset(dftemp[,!names(dftemp) %in% c("Age","HasCabin")],dftemp$Missing=="010") , na.action = na.pass,nodesize=20)
+
+rf011 <- randomForest(factor(Survived) ~ .,
+                        data = subset(dftemp[,!names(dftemp) %in% c("Age")],dftemp$Missing=="011") , na.action = na.pass,nodesize=20)
+
+rf100 <- randomForest(factor(Survived) ~ .,
+                        data = subset(dftemp[,!names(dftemp) %in% c("Farebracket","HasCabin")],dftemp$Missing=="100") , na.action = na.pass,nodesize=20)
+
+
+
+
 ```
 
-## Random Forest
 
 ```{r}
-set.seed(414)
-rf_model <- randomForest(factor(Survived) ~ Pclass + Sex + Agebracket +
-                                 Farebracket + Race + HasCabin + Ticketsize +
-                                 Embarked + Title,
-                         data = mergedagestrain,na.action = na.pass)
 
-rf_model
-rf_model$confusion
-varImpPlot(rf_model)
-importance(rf_model)
+for (i in unique(merged$Missing)){
+  
+ # First define which variables need to be dropped if the data was missing originally
+  print(i)
+  
+  a <- c()
+  if (strsplit(as.character(i), "")[[1]][1] == 0) {
+    a <- append(a,"Age")
+  } 
+  if(strsplit(as.character(i), "")[[1]][2] == 0) {
+    a <- append(a,"Farebracket")
+  } 
+  if (strsplit(as.character(i), "")[[1]][3] == 0){
+    a <- append(a,"HasCabin")
+  }
+  
+  
+  # Now subset the data accordingly
+  
+  dftemp <- mergedtrain[,c("Survived","Pclass","Sex","Farebracket","Age","HasCabin","Ticketsize","Embarked","Title","Missing")]
+  dftemp <- dftemp[, !names(dftemp) %in% a]
+  
+  # Finally train all the models, calling them, for example "rf100" where Missing == 100.
+  
+   rf <- randomForest(factor(Survived) ~ .,
+                        data = dftemp[dftemp$Missing==i,] ,na.action = na.pass,nodesize=20)
+  
+  #paste("rf",i,sep="") <- rf
+}
 
-set.seed(414)
-rf_model2 <- randomForest(factor(Survived) ~ Pclass + Sex + Farebracket + HasCabin + Ticketsize + Embarked + Title,
-                         data = mergedagestrain,na.action = na.pass,nodesize=20)
-
-rf_model2 #looks the best
-plot(rf_model2)
-varImpPlot(rf_model2)
-importance(rf_model2)
-```
-
-## GBM
-
-```{r,message=FALSE}
-features <- c("Survived","Pclass","Sex","SibSp","Parch","HasCabin","Farebracket","Title","Ticketsize","Age_range")
-fitControl <- trainControl(method = "repeatedcv", number = 4, repeats = 4)
-
-set.seed(414)
-gbm1 <- suppressWarnings(train(as.factor(Survived) ~ ., data = train[features], 
-              method = "gbm", trControl = fitControl,verbose = FALSE))
-prediction <- predict(gbm1, test[features],type= "prob")
-prediction <- data.frame(ifelse(prediction[,2] > 0.5,1,0))
-mean(prediction[,1] == test$Survived) #83% accuracy
-
-set.seed(414)
-fitControl2 <- trainControl(method = "repeatedcv", number = 6, repeats = 4)
-gbm2 <- suppressWarnings(train(as.factor(Survived) ~ ., data = train[features], 
-              method = "gbm", trControl = fitControl,verbose = FALSE))
-prediction <- predict(gbm2, test[features],type= "prob")
-prediction <- data.frame(ifelse(prediction[,2] > 0.5,1,0))
-mean(prediction[,1] == test$Survived) #83% accuracy
 ```
 
 ## Splitting models depending on whether age is available or not
