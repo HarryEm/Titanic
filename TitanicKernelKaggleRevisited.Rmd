@@ -16,7 +16,7 @@ Here I build on my previous Kernel (please see link below) to compare two differ
 
 https://www.kaggle.com/harryem/feature-engineering-on-the-titanic-for-0-81339
 
-## Formal delineation of the problem
+## The problem
 
 Given test features $X_{TEST} \in /R^{n * k}$ is a matrix of n test examples and k features and vector $y_{TEST} \in \{0,1\}^n$ classifying survived (1) or did not survive (0), our aim is to estimate a function f such that $y = f(x)$ which minimises misclassification, that is $$ min \sum_{i=1}^{n}(y_i - f(x_i))^2$$ where $f(x_i)$ is the prediction for the ith test example and $y_i$ is the ith classification, which is known only by the Kaggle administrators.
 
@@ -76,7 +76,9 @@ for (i in a) {
   missing <- paste(missing,as.integer(!is.na(merged[i])^!merged[i]==""),sep="")
                  }
 
-merged[missing=="100",]
+merged[missing=="100",] 
+
+#There is only one example of this combination and its in the test set. I will discuss this later.
 
 table(missing)
 merged$Missing <- missing
@@ -375,95 +377,44 @@ unique(merged$Missing)
 dftemp <- mergedtrain[,c("Survived","Pclass","Sex","Farebracket","Age","HasCabin","Ticketsize","Embarked","Title","Missing")]
 
 rf110 <- randomForest(factor(Survived) ~ .,
-                        data = subset(dftemp[,!names(dftemp) %in% c("HasCabin")],dftemp$Missing=="110") , na.action = na.pass,nodesize=20)
+                        data = subset(dftemp[,!names(dftemp) %in% c("HasCabin")],dftemp$Missing=="110"))
 
 rf111 <- randomForest(factor(Survived) ~ .,
-                        data = subset(dftemp[,!names(dftemp) %in% c()],dftemp$Missing=="111") , na.action = na.pass,nodesize=20)
+                        data = subset(dftemp[,!names(dftemp) %in% c()],dftemp$Missing=="111"))
 
 rf010 <- randomForest(factor(Survived) ~ .,
-                        data = subset(dftemp[,!names(dftemp) %in% c("Age","HasCabin")],dftemp$Missing=="010") , na.action = na.pass,nodesize=20)
+                        data = subset(dftemp[,!names(dftemp) %in% c("Age","HasCabin")],dftemp$Missing=="010"))
 
 rf011 <- randomForest(factor(Survived) ~ .,
-                        data = subset(dftemp[,!names(dftemp) %in% c("Age")],dftemp$Missing=="011") , na.action = na.pass,nodesize=20)
+                        data = subset(dftemp[,!names(dftemp) %in% c("Age")],dftemp$Missing=="011"))
 
 rf100 <- randomForest(factor(Survived) ~ .,
-                        data = subset(dftemp[,!names(dftemp) %in% c("Farebracket","HasCabin")],dftemp$Missing=="100") , na.action = na.pass,nodesize=20)
+                        data = subset(dftemp[,!names(dftemp) %in% c("Farebracket","HasCabin")],dftemp$Missing=="100"))
 
+rf100 <- rf111
 
-
-
+rf110$confusion
+rf111$confusion
+rf010$confusion
+rf011$confusion
 ```
 
+There are no training examples for the 100 example in the test set; as its one example I will just use the imputed value for HasCabin and Fare and treat it the same as the 111 model.
+
+# Evaluation and submission
+
+I predict each test example depending on which combination of variables were observed.
 
 ```{r}
+p110 <- predict(rf110,mergedtest[mergedtest$Missing=="110",])
+p111 <- predict(rf110,mergedtest[mergedtest$Missing=="111",])
+p010 <- predict(rf110,mergedtest[mergedtest$Missing=="010",])
+p011 <- predict(rf110,mergedtest[mergedtest$Missing=="011",])
+p100 <- predict(rf110,mergedtest[mergedtest$Missing=="100",])
 
-for (i in unique(merged$Missing)){
-  
- # First define which variables need to be dropped if the data was missing originally
-  print(i)
-  
-  a <- c()
-  if (strsplit(as.character(i), "")[[1]][1] == 0) {
-    a <- append(a,"Age")
-  } 
-  if(strsplit(as.character(i), "")[[1]][2] == 0) {
-    a <- append(a,"Farebracket")
-  } 
-  if (strsplit(as.character(i), "")[[1]][3] == 0){
-    a <- append(a,"HasCabin")
-  }
-  
-  
-  # Now subset the data accordingly
-  
-  dftemp <- mergedtrain[,c("Survived","Pclass","Sex","Farebracket","Age","HasCabin","Ticketsize","Embarked","Title","Missing")]
-  dftemp <- dftemp[, !names(dftemp) %in% a]
-  
-  # Finally train all the models, calling them, for example "rf100" where Missing == 100.
-  
-   rf <- randomForest(factor(Survived) ~ .,
-                        data = dftemp[dftemp$Missing==i,] ,na.action = na.pass,nodesize=20)
-  
-  #paste("rf",i,sep="") <- rf
-}
-
-```
-
-## Splitting models depending on whether age is available or not
-
-```{r}
-row.names(merged) <- merged$PassengerId
-mergedtrain <- merged[1:891,]
-mergedtest <- merged[892:1309,]
-mergedtrain$Survived <- as.factor(mergedtrain$Survived)
-
-sum(is.na(mergedtrain$Age))
-sum(is.na(mergedtest$Age))
-
-rf_model_ages <- randomForest(factor(Survived) ~ Pclass + Sex + Farebracket + HasCabin + Agebracket + Ticketsize + Embarked + Title,
-                              data = mergedtrain[!is.na(mergedtrain$Age),],nodesize=20)
-
-rf_model_ages
-rf_model_ages$confusion
-varImpPlot(rf_model_ages)
-importance(rf_model_ages)
+submission <- rbind(data.frame(PassengerId=names(p110),Survived=p110),data.frame(PassengerId=names(p111),Survived=p111),data.frame(PassengerId=names(p010),Survived=p010),data.frame(PassengerId=names(p011),Survived=p011),data.frame(PassengerId=names(p100),Survived=p100))
 
 
-rf_model_noages <- randomForest(factor(Survived) ~ Pclass + Sex +
-                                      Farebracket + Race + HasCabin + Ticketsize +
-                                      Embarked + Title,
-                              data = mergedtrain[is.na(mergedtrain$Age),],nodesize=20)
-
-rf_model_noages
-rf_model_noages$confusion
-varImpPlot(rf_model_noages)
-importance(rf_model_noages)
-
-p1 <- predict(rf_model_ages, mergedtest[!is.na(mergedtest$Age),])
-p2 <- predict(rf_model_noages, mergedtest[is.na(mergedtest$Age),])
-prediction <- join(data.frame(PassengerId=names(p1),Survived=p1),data.frame(PassengerId=names(p2),Survived=p2))
-
-# This actually didn't help my position on the leaderboard, pretty surprised by this
 ```
 
 # Evaluation and submission
@@ -477,13 +428,4 @@ if(!file.exists("./predictions.csv")) {
         write.csv(submission, file = "./predictions.csv",row.names = F)}
 ```
 
-This submission got me into the top 6% which I was very pleased with for my first attempt.
-
-I am a little puzzled how many of my intuitions were wrong, that splitting age into two models would
-make a big difference, and the clearly crucial feature "Title" would not have much impact.
-
-For my next project I want to take a more purposeful approach to model selection, with a more
-extensive evaluation and diagnostics for parameter tuning. I also want to work on seeing how
-feature engineering and model selection work in concert with each other.
-
-Thanks for reading, if you've got this far surely its worth an upvote :)
+This submission obtained 0.78947 accuracy, which is a decent amount worse than the 0.81339 I obtained from imputing variables and running a single random forest model. Lookined at some of the individual confusion matrices for the models, I expect this is because the training data isn't large enough to split into so many partitions. I would be interested to see how this approach performs on a larger dataset.
