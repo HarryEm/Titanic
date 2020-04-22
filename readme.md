@@ -1,4 +1,6 @@
-# This is a collection of files to create two pieces exploring Kaggle's Titanic dataset.
+# Kaggle Titanic
+
+This is a collection of files to create two pieces exploring Kaggle's Titanic dataset.
 
 ## TitanicKernelKaggle is my first attempt at a full scale data project
 
